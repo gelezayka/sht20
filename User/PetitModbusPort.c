@@ -11,6 +11,8 @@
 volatile unsigned char xdata PetitReceiveBuffer[PETITMODBUS_RECEIVE_BUFFER_SIZE];   // Buffer to collect data from hardware
 volatile unsigned char xdata PetitReceiveCounter=0;                                 // Collected data number
 extern volatile unsigned char xdata PETITMODBUS_SLAVE_ADDRESS;
+extern void readSensors(void);
+extern void checkConfig(void);
 
 // UART Initialize for Microconrollers, yes you can use another phsycal layer!
 void PetitModBus_UART_Initialise(void)
@@ -29,27 +31,21 @@ void PetitModBus_TIMER_Initialise(void)
 // This is used for send one character
 void PetitModBus_UART_Putch(unsigned char c)
 {
-		
-		//while (!TI);
-		//TI = 0;
-		//SBUF = c;
-				TI=0;
-				SBUF = c;
-				set_WDCLR;
-				while(TI==0);
+		TI=0;
+		SBUF = c;
+		set_WDCLR;
+		while(TI==0);
 }
 
 // This is used for send string, better to use DMA for it ;)
 unsigned char PetitModBus_UART_String(unsigned char *s, unsigned int Length)
 {
     unsigned short  DummyCounter;
-    clr_EA;
 		P15 = 1; // enable TX
     for(DummyCounter=0;DummyCounter<Length;DummyCounter++) {
         PetitModBus_UART_Putch(s[DummyCounter]);
 		}
     P15 = 0; // enable RX
-		set_EA;
     return TRUE;
 }
 
@@ -58,16 +54,13 @@ unsigned char PetitModBus_UART_String(unsigned char *s, unsigned int Length)
 // Better to use DMA
 void ReceiveInterrupt(unsigned char Data)
 {
-		if (PetitReceiveBuffer[0] != PETITMODBUS_SLAVE_ADDRESS) {
-			PetitReceiveCounter=0;
-		}
     PetitReceiveBuffer[PetitReceiveCounter]   =Data;
     PetitReceiveCounter++;
 
     if(PetitReceiveCounter>PETITMODBUS_RECEIVE_BUFFER_SIZE)  
         PetitReceiveCounter=0;
 
-    PetitModbusTimerValue=0;
+		PetitModbusTimerValue=0;
 }
 
 // Call this function into 1ms Interrupt or Event!
@@ -76,3 +69,13 @@ void PetitModBus_TimerValues(void)
     PetitModbusTimerValue++;
 }
 /******************************************************************************/
+
+void ProcessPreRead()
+{
+		readSensors();
+}
+
+void ProcessPostWrite()
+{
+		checkConfig();
+}

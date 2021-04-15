@@ -26,5 +26,6 @@ extern unsigned char    PetitModBus_UART_String(unsigned char *s, unsigned int L
 
 extern void             ReceiveInterrupt(unsigned char Data);
 extern void             PetitModBus_TimerValues(void);
-
+extern void 						ProcessPreRead(void);
+extern void							ProcessPostWrite(void);
 #endif

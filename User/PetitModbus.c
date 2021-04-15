@@ -534,13 +534,25 @@ void ProcessPetitModbus(void)
             switch (Petit_Rx_Data.Function)                                     // Data is for us but which function?
             {
                 #if PETITMODBUS_READ_HOLDING_REGISTERS_ENABLED > 0
-                case PETITMODBUS_READ_HOLDING_REGISTERS:    {   HandlePetitModbusReadHoldingRegisters();        break;  }
+                case PETITMODBUS_READ_HOLDING_REGISTERS:    {   
+									ProcessPreRead();
+									HandlePetitModbusReadHoldingRegisters();
+									break;
+								}
                 #endif
 								#if PETITMODBUS_READ_INPUT_REGISTERS_ENABLED > 0
-                case PETITMODBUS_READ_INPUT_REGISTERS:    	{   HandlePetitModbusReadInputRegisters();        break;  }
+                case PETITMODBUS_READ_INPUT_REGISTERS:    	{
+									ProcessPreRead();
+									HandlePetitModbusReadInputRegisters();
+									break;  
+								}
                 #endif
                 #if PETITMODBUSWRITE_SINGLE_REGISTER_ENABLED > 0
-                case PETITMODBUS_WRITE_SINGLE_REGISTER:     {   HandlePetitModbusWriteSingleRegister();         break;  }
+                case PETITMODBUS_WRITE_SINGLE_REGISTER:     {  
+									HandlePetitModbusWriteSingleRegister();
+									ProcessPostWrite();
+									break;  
+								}
                 #endif
                 #if PETITMODBUS_WRITE_MULTIPLE_REGISTERS_ENABLED > 0
                 case PETITMODBUS_WRITE_MULTIPLE_REGISTERS:  {   HandleMPetitodbusWriteMultipleRegisters();      break;  }

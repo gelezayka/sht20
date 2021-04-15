@@ -16,15 +16,16 @@
 #define SHT20_READ 														0x01
 #define SHT20_WRITE 													0x00
 #define SHIFTED_DIVISOR                       0x988000
-#define ERROR_I2C                    					998
-#define ERROR_BAD_CRC                         999
+#define ERROR_I2C                    					0x03E6
+#define ERROR_BAD_CRC                         0x03E7
 #define TRIGGER_TEMP_MEASURE_HOLD             0xE3
 #define TRIGGER_HUMD_MEASURE_HOLD             0xE5
 #define TRIGGER_TEMP_MEASURE_NOHOLD           0xF3
 #define TRIGGER_HUMD_MEASURE_NOHOLD           0xF5
 
+bit I2C_Reset_Flag;
 volatile unsigned char xdata page_buffer[128];
-
+volatile UINT16 xdata TimerCounter=0;   
 UINT8 riflag = 0, pflag = 0;
 UINT8 xdata BUF[16];
 UINT8 in_c;
@@ -132,23 +133,11 @@ void writeConfig()
 	clr_IAPEN;
 }
 
-/*
- * putchar (mini version): outputs charcter only
- */
-
-char putchar (char c)                   
-{
-  while (!TI);
-  TI = 0;
-  return (SBUF = c);
-}
-
-
 void I2C_SI_Check(void)
 {
   if (I2STAT == 0x00)
   {
-     //I2C_Reset_Flag = 1;
+     I2C_Reset_Flag = 1;
      set_STO;
      SI = 0;
      if(SI)
@@ -179,13 +168,14 @@ UINT8 checkCRC(UINT16 message_from_sensor, UINT8 check_value_from_sensor)
 UINT16 readValue(UINT8 cmd)
 {
 	UINT8 msb, lsb, checksum;
-	UINT16 rawValue;
+	UINT16 rawValue = ERROR_I2C;
 	
 	set_STA;
 	clr_SI;
 	while (!SI);
 	if (I2STAT != 0x08) {
-		return (ERROR_I2C);
+		I2C_Reset_Flag = 1;
+		goto Read_Error_Stop;
 	}
 	
 	// send write
@@ -194,7 +184,8 @@ UINT16 readValue(UINT8 cmd)
 	clr_SI;
 	while (!SI);
 	if (I2STAT != 0x18) {
-		return (ERROR_I2C);
+		I2C_Reset_Flag = 1;
+		goto Read_Error_Stop;
 	}
 	
 	
@@ -203,7 +194,8 @@ UINT16 readValue(UINT8 cmd)
 	clr_SI;
 	while (!SI);
 	if (I2STAT != 0x28) {
-		return (ERROR_I2C);
+		I2C_Reset_Flag = 1;
+		goto Read_Error_Stop;
 	}
 	
 	//clr_STA;
@@ -211,7 +203,8 @@ UINT16 readValue(UINT8 cmd)
 	clr_SI;
 	while (!SI);
 	if (I2STAT != 0x10) {
-		return (ERROR_I2C);
+		I2C_Reset_Flag = 1;
+		goto Read_Error_Stop;
 	}
 	
 	// send read
@@ -221,7 +214,8 @@ UINT16 readValue(UINT8 cmd)
 	clr_SI;
   while (!SI);
 	if (I2STAT != 0x40) {
-		return (ERROR_I2C);
+		I2C_Reset_Flag = 1;
+		goto Read_Error_Stop;
 	}
 	
 	Timer0_Delay1ms(100);
@@ -230,7 +224,8 @@ UINT16 readValue(UINT8 cmd)
 	clr_SI;
   while (!SI);
 	if (I2STAT != 0x50) {
-		return (ERROR_I2C);
+		I2C_Reset_Flag = 1;
+		goto Read_Error_Stop;
 	}
 	msb = I2DAT;
 
@@ -238,7 +233,8 @@ UINT16 readValue(UINT8 cmd)
 	clr_SI;
   while (!SI);
 	if (I2STAT != 0x50) {
-		return (ERROR_I2C);
+		I2C_Reset_Flag = 1;
+		goto Read_Error_Stop;
 	}
 	lsb = I2DAT;
 
@@ -246,7 +242,8 @@ UINT16 readValue(UINT8 cmd)
 	clr_SI;
   while (!SI);
 	if (I2STAT != 0x50) {
-		return (ERROR_I2C);
+		I2C_Reset_Flag = 1;
+		goto Read_Error_Stop;
 	}
 	checksum = I2DAT;
 
@@ -263,6 +260,12 @@ UINT16 readValue(UINT8 cmd)
 			return (ERROR_BAD_CRC);
 	}
 	
+Read_Error_Stop:
+	if (I2C_Reset_Flag) {
+		I2C_SI_Check();
+		I2C_Reset_Flag = 0;
+	}
+
 	return rawValue & 0xFFFC;
 }
 
@@ -280,9 +283,11 @@ float readTemperature()
 	return (rawTemperature * (175.72 / 65536.0)) - 46.85;
 }
 
-void Timer0_ISR (void) interrupt 1
+void Timer2_ISR (void) interrupt 5
 {
-	//PetitModBus_TimerValues();
+	clr_TF2;
+	//TimerCounter++;
+	PetitModBus_TimerValues();
 }
 
 void SerialPort0_ISR(void) interrupt 4
@@ -298,37 +303,62 @@ void SerialPort0_ISR(void) interrupt 4
   }
 }
 
-void TM0_ini(void)
+void TM_ini(void)
 {
-  TH0 = TL0 =0;     // interrupt timer 140us
-  set_TR0;       // Start timer0
-  set_PSH;       // Serial port 0 interrupt level2
-  IE = 0x92;     // EA=1, ES=1,ET0=1
+	TIMER2_DIV_16;
+	TIMER2_Auto_Reload_Delay_Mode;
+	RCMP2L = TIMER_DIV16_VALUE_10ms;
+	RCMP2H = TIMER_DIV16_VALUE_10ms>>8;
+	TL2 = 0;
+	TH2 = 0;
+	set_ET2;                                    // Enable Timer2 interrupt
+	set_EA;
+	set_TR2;                                    // Timer2 run
 }
 
 void UART0_ini(UINT32 u32Baudrate)
 {
-    P06_Quasi_Mode;    //Setting UART pin as Quasi mode for transmit
-    P07_Quasi_Mode;    //Setting UART pin as Quasi mode for transmit  
-    
-    SCON = 0x52;     //UART0 Mode1,REN=1,TI=1
-    TMOD |= 0x22;    //Timer1 Mode1, TIMER 0 MODE2
+  P06_Quasi_Mode;    //Setting UART pin as Quasi mode for transmit
+  P07_Quasi_Mode;    //Setting UART pin as Quasi mode for transmit  
+	SCON = 0x50;     //UART0 Mode1,REN=1,TI=1
+  set_SMOD;        //UART0 Double Rate Enable
+  T3CON &= 0xF8;   //T3PS2=0,T3PS1=0,T3PS0=0(Prescale=1)
+  set_BRCK;        //UART0 baud rate clock source = Timer3
+  RH3 = HIBYTE(65536 - (1000000/u32Baudrate)-1); 
+	RL3 = LOBYTE(65536 - (1000000/u32Baudrate)-1);
+	set_TR3;         //Trigger Timer3
+	set_ES;
+  set_EA;
+}
 
-    set_SMOD;
-    set_T1M;
-    clr_BRCK;        //Serial port 0 baud rate clock source = Timer1
-    TH1 = 256 - (1000000/u32Baudrate);                        /*16 MHz to 115200 Baudrate*/
-    
-    set_TR1;           //Start timer1
-    ES=1;
-    EA=1;
+void readSensors()
+{
+	float t, h;
+	t = readTemperature() + config.tc/10;
+	h = readHumidity() + config.hc/10;;	
+	PetitRegisters[0].ActValue = t * 10;
+	PetitRegisters[1].ActValue = h * 10;
+}
+
+void checkConfig()
+{
+	if ((config.tc != PetitRegisters[5].ActValue) ||
+					(config.hc != PetitRegisters[6].ActValue) ||
+					(config.address != PetitRegisters[3].ActValue) ||
+					(config.baudRate != PetitRegisters[4].ActValue)
+	) {
+		config.address = PetitRegisters[3].ActValue;
+		config.baudRate = PetitRegisters[4].ActValue;
+		config.tc = PetitRegisters[5].ActValue;
+		config.hc = PetitRegisters[6].ActValue;
+		writeConfig();
+		InitPetitModbus(config.address);
+	}
 }
 
 void main (void)
 {
 	UINT16 code *u16_addr;
-	UINT32 delay = 0;
-	float t, h;
 	Set_All_GPIO_Quasi_Mode;
 	I2CLK = I2C_CLOCK;
 	set_I2CEN;
@@ -348,51 +378,35 @@ void main (void)
 	InitPetitModbus(config.address);
 	
 	UART0_ini(9600);
-	TM0_ini();
-	
+	TM_ini();
+
 	// Temperature
 	PetitRegisters[0].Addr = 0x001;
 	PetitRegisters[0].ActValue = 0;
 	// Humidity
 	PetitRegisters[1].Addr = 0x002;
 	PetitRegisters[1].ActValue = 0;
+	
+	// Timeout
+	PetitRegisters[2].Addr = 0x003;
+	PetitRegisters[2].ActValue = 0;
+	
 	// Device Address
-	PetitRegisters[2].Addr = 0x0101;
-	PetitRegisters[2].ActValue = config.address;
+	PetitRegisters[3].Addr = 0x0101;
+	PetitRegisters[3].ActValue = config.address;
+	
 	// Baud Rate 0:9600 1:14400 2:19200
-	PetitRegisters[3].Addr = 0x0102;
-	PetitRegisters[3].ActValue = config.baudRate;
+	PetitRegisters[4].Addr = 0x0102;
+	PetitRegisters[4].ActValue = config.baudRate;
 	// Temperature correction(/10) -10.0~10.0
-	PetitRegisters[4].Addr = 0x0103;
-	PetitRegisters[4].ActValue = config.tc;
+	PetitRegisters[5].Addr = 0x0103;
+	PetitRegisters[5].ActValue = config.tc;
 	// Humidity correction(/10) -10.0~10.0
-	PetitRegisters[5].Addr = 0x0104;
-	PetitRegisters[5].ActValue = config.hc;
+	PetitRegisters[6].Addr = 0x0104;
+	PetitRegisters[6].ActValue = config.hc;
 	
 	P15 = 0; // enable RX
 	while(1)  {
-		if (delay > 250000) {
-			clr_EA; // disable all interrupts
-			t = readTemperature() + config.tc/10;
-			h = readHumidity() + config.hc/10;;	
-			delay = 0;
-			PetitRegisters[0].ActValue = t * 10;
-			PetitRegisters[1].ActValue = h * 10;
-			
-			if ((config.tc != PetitRegisters[4].ActValue) ||
-					(config.hc != PetitRegisters[5].ActValue) ||
-					(config.address != PetitRegisters[2].ActValue) ||
-					(config.baudRate != PetitRegisters[3].ActValue)
-				) {
-					config.address = PetitRegisters[2].ActValue;
-					config.baudRate = PetitRegisters[3].ActValue;
-					config.tc = PetitRegisters[4].ActValue;
-					config.hc = PetitRegisters[5].ActValue;
-					writeConfig();
-			}
-			set_EA; // enable all interrupts
-		}
-		delay++;
 		ProcessPetitModbus();
 	}
 }

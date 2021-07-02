@@ -405,6 +405,15 @@ void main (void)
 	PetitRegisters[6].Addr = 0x0104;
 	PetitRegisters[6].ActValue = config.hc;
 	
+	// enable watchdog timer
+	TA = 0xAA;
+  TA = 0x55;
+  WDCON = 0x07;                       
+  set_WDCLR;                                                  
+  while((WDCON | ~SET_BIT6) == 0xFF);         
+  EA = 1;
+  set_WDTR;                                                       
+	
 	P15 = 0; // enable RX
 	while(1)  {
 		ProcessPetitModbus();

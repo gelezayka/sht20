@@ -14,6 +14,8 @@ extern volatile unsigned char xdata PETITMODBUS_SLAVE_ADDRESS;
 extern void readSensors(void);
 extern void checkConfig(void);
 
+unsigned short msgCount = 0;
+	
 // UART Initialize for Microconrollers, yes you can use another phsycal layer!
 void PetitModBus_UART_Initialise(void)
 {
@@ -44,6 +46,11 @@ unsigned char PetitModBus_UART_String(unsigned char *s, unsigned int Length)
 		P15 = 1; // enable TX
     for(DummyCounter=0;DummyCounter<Length;DummyCounter++) {
         PetitModBus_UART_Putch(s[DummyCounter]);
+		}
+		msgCount++;
+		if (msgCount == 60) {
+				msgCount = 0;
+				SW_Reset();
 		}
     P15 = 0; // enable RX
     return TRUE;

@@ -6,12 +6,13 @@
 #include "Common.h"
 #include "Delay.h"
 
+#include "I2C.h"
+
 #include "PetitModbusPort.h"
 #include "PetitModbus.h"
 
 #define ADDR_BASE 0x4700
 
-#define I2C_CLOCK 														2
 #define SHT20_ADDR 														0x80
 #define SHT20_READ 														0x01
 #define SHT20_WRITE 													0x00
@@ -132,6 +133,21 @@ void writeConfig()
 	clr_APUEN;
 	clr_IAPEN;
 }
+ 
+UINT8 checkCRC(UINT16 message_from_sensor, UINT8 check_value_from_sensor)
+{
+	UINT8 i;
+	UINT32 remainder = (UINT32)message_from_sensor << 8;
+	UINT32 divsor = (UINT32)SHIFTED_DIVISOR;
+	remainder |= check_value_from_sensor;
+	for(i = 0 ; i < 16 ; i++){
+    if(remainder & (UINT32)1 << (23 - i)){
+			remainder ^= divsor;
+    }
+		divsor >>= 1;
+  }
+	return (UINT8)remainder;
+}
 
 void I2C_SI_Check(void)
 {
@@ -149,121 +165,30 @@ void I2C_SI_Check(void)
     }
   }
 }
- 
-UINT8 checkCRC(UINT16 message_from_sensor, UINT8 check_value_from_sensor)
-{
-	UINT8 i;
-	UINT32 remainder = (UINT32)message_from_sensor << 8;
-	UINT32 divsor = (UINT32)SHIFTED_DIVISOR;
-	remainder |= check_value_from_sensor;
-	for(i = 0 ; i < 16 ; i++){
-    if(remainder & (UINT32)1 << (23 - i)){
-			remainder ^= divsor;
-    }
-		divsor >>= 1;
-  }
-	return (UINT8)remainder;
-}
 
 UINT16 readValue(UINT8 cmd)
 {
-	UINT8 msb, lsb, checksum;
+	UINT8 msb = 0, lsb = 0, checksum = 0;
 	UINT16 rawValue = ERROR_I2C;
 	
-	set_STA;
-	clr_SI;
-	while (!SI);
-	if (I2STAT != 0x08) {
-		I2C_Reset_Flag = 1;
-		goto Read_Error_Stop;
-	}
+	I2C_start();
+	I2C_write(SHT20_ADDR | SHT20_WRITE, 1);
+	I2C_write(cmd, 0);
 	
-	// send write
-	I2DAT = (SHT20_ADDR | SHT20_WRITE);
-	clr_STA;
-	clr_SI;
-	while (!SI);
-	if (I2STAT != 0x18) {
-		I2C_Reset_Flag = 1;
-		goto Read_Error_Stop;
-	}
-	
-	
-	// send command
-	I2DAT = cmd; // Trigger T measurement
-	clr_SI;
-	while (!SI);
-	if (I2STAT != 0x28) {
-		I2C_Reset_Flag = 1;
-		goto Read_Error_Stop;
-	}
-	
-	//clr_STA;
-	set_STA;
-	clr_SI;
-	while (!SI);
-	if (I2STAT != 0x10) {
-		I2C_Reset_Flag = 1;
-		goto Read_Error_Stop;
-	}
-	
-	// send read
-	//set_AA;                             /* Set Assert Acknowledge Control Bit */
-	clr_STA;                              /* Clear STA and Keep SI value in I2CON */
-	I2DAT = (SHT20_ADDR | SHT20_READ);	
-	clr_SI;
-  while (!SI);
-	if (I2STAT != 0x40) {
-		I2C_Reset_Flag = 1;
-		goto Read_Error_Stop;
-	}
+	I2C_start();
+	I2C_write(SHT20_ADDR | SHT20_READ, 1);
 	
 	Timer0_Delay1ms(100);
 	
-	set_AA;                             /* Set Assert Acknowledge Control Bit */
-	clr_SI;
-  while (!SI);
-	if (I2STAT != 0x50) {
-		I2C_Reset_Flag = 1;
-		goto Read_Error_Stop;
-	}
-	msb = I2DAT;
+	msb = I2C_read(I2C_ACK);
+	lsb = I2C_read(I2C_ACK);
+	checksum = I2C_read(I2C_ACK);
+	I2C_stop();
 
-	set_AA;                             /* Set Assert Acknowledge Control Bit */
-	clr_SI;
-  while (!SI);
-	if (I2STAT != 0x50) {
-		I2C_Reset_Flag = 1;
-		goto Read_Error_Stop;
-	}
-	lsb = I2DAT;
-
-	set_AA;                             /* Set Assert Acknowledge Control Bit */
-	clr_SI;
-  while (!SI);
-	if (I2STAT != 0x50) {
-		I2C_Reset_Flag = 1;
-		goto Read_Error_Stop;
-	}
-	checksum = I2DAT;
-
-	clr_SI;
-	set_STO;
-	while (STO)                        /* Check STOP signal */
-	{
-		I2C_SI_Check();
-	}
-	
 	rawValue = ((UINT16) msb << 8) | (UINT16) lsb;
-	
+
 	if (checkCRC(rawValue, checksum) != 0) {
 			return (ERROR_BAD_CRC);
-	}
-	
-Read_Error_Stop:
-	if (I2C_Reset_Flag) {
-		I2C_SI_Check();
-		I2C_Reset_Flag = 0;
 	}
 
 	return rawValue & 0xFFFC;
@@ -316,21 +241,6 @@ void TM_ini(void)
 	set_TR2;                                    // Timer2 run
 }
 
-void UART0_ini(UINT32 u32Baudrate)
-{
-  P06_Quasi_Mode;    //Setting UART pin as Quasi mode for transmit
-  P07_Quasi_Mode;    //Setting UART pin as Quasi mode for transmit  
-	SCON = 0x50;     //UART0 Mode1,REN=1,TI=1
-  set_SMOD;        //UART0 Double Rate Enable
-  T3CON &= 0xF8;   //T3PS2=0,T3PS1=0,T3PS0=0(Prescale=1)
-  set_BRCK;        //UART0 baud rate clock source = Timer3
-  RH3 = HIBYTE(65536 - (1000000/u32Baudrate)-1); 
-	RL3 = LOBYTE(65536 - (1000000/u32Baudrate)-1);
-	set_TR3;         //Trigger Timer3
-	set_ES;
-  set_EA;
-}
-
 void readSensors()
 {
 	float t, h;
@@ -358,11 +268,12 @@ void checkConfig()
 
 void main (void)
 {
+	
 	UINT16 code *u16_addr;
 	Set_All_GPIO_Quasi_Mode;
-	I2CLK = I2C_CLOCK;
-	set_I2CEN;
 	P15_PushPull_Mode;
+	
+	I2C_init();
 	
 	Write_DATAFLASH_BYTE (0x3802, 0x34);
 	readConfig();
@@ -377,9 +288,9 @@ void main (void)
 	
 	InitPetitModbus(config.address);
 	
-	UART0_ini(9600);
+	InitialUART0_Timer3(9600);
 	TM_ini();
-
+	
 	// Temperature
 	PetitRegisters[0].Addr = 0x001;
 	PetitRegisters[0].ActValue = 0;
@@ -405,14 +316,16 @@ void main (void)
 	PetitRegisters[6].Addr = 0x0104;
 	PetitRegisters[6].ActValue = config.hc;
 	
+	//Check_WDT_Reset_Config();
+	
 	// enable watchdog timer
-	TA = 0xAA;
-  TA = 0x55;
-  WDCON = 0x07;                       
-  set_WDCLR;                                                  
-  while((WDCON | ~SET_BIT6) == 0xFF);         
-  EA = 1;
-  set_WDTR;                                                       
+	//TA = 0xAA;
+  //TA = 0x55;
+  //WDCON = 0x07;                       
+  //set_WDCLR;                                                  
+  //while((WDCON | ~SET_BIT6) == 0xFF);         
+  //EA = 1;
+  //set_WDTR;                                                       
 	
 	P15 = 0; // enable RX
 	while(1)  {

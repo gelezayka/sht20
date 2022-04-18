@@ -11,7 +11,7 @@
 #define NUMBER_OF_OUTPUT_PETITREGISTERS                 7                       // Petit Modbus RTU Slave Output Register Number
                                                                                 // Have to put a number of registers here
                                                                                 // It has to be bigger than 0 (zero)!!
-#define PETITMODBUS_TIMEOUTTIMER                        25  										// 250ms
+#define PETITMODBUS_TIMEOUTTIMER                        25 										// 250ms
 
 #define PETITMODBUS_READ_HOLDING_REGISTERS_ENABLED      ( 1 )                   // If you want to use make it 1, or 0
 #define PETITMODBUS_READ_INPUT_REGISTERS_ENABLED        ( 1 )                   // If you want to use make it 1, or 0

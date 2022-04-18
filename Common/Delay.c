@@ -35,6 +35,7 @@ void Timer0_Delay100us(UINT32 u32CNT)
 }
 */
 //------------------------------------------------------------------------------
+
 void Timer0_Delay1ms(UINT32 u32CNT)
 {
     clr_T0M;                                		//T0M=0, Timer0 Clock = Fsys/12
